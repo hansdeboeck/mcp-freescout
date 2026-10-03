@@ -83,6 +83,50 @@ describe('buildServer', () => {
     expect(Object.values(tools).every((tool) => tool.outputSchema === undefined)).toBe(true);
   });
 
+  it('advertises read-only and write annotations to clients through tools/list', async () => {
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const pending = new Map<number, (message: Record<string, unknown>) => void>();
+    clientTransport.onmessage = (message) => {
+      const { id } = message as { id?: unknown };
+      if (typeof id === 'number') pending.get(id)?.(message as Record<string, unknown>);
+    };
+    const request = (id: number, method: string, params: Record<string, unknown> = {}) =>
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        pending.set(id, resolve);
+        clientTransport.send({ jsonrpc: '2.0', id, method, params }).catch(reject);
+      });
+    const handle = serveStdio(() => buildServer({ api: createApi() as never }), {
+      transport: serverTransport,
+    });
+
+    await request(1, 'initialize', {
+      protocolVersion: '2025-11-25',
+      capabilities: {},
+      clientInfo: { name: 'test-client', version: '1.0.0' },
+    });
+    await clientTransport.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    const response = await request(2, 'tools/list');
+    const { tools } = response.result as {
+      tools: Array<{ name: string; annotations?: Record<string, boolean> }>;
+    };
+
+    expect(Object.fromEntries(tools.map((tool) => [tool.name, tool.annotations]))).toEqual({
+      freescout_get_ticket: { readOnlyHint: true },
+      freescout_analyze_ticket: { readOnlyHint: true },
+      freescout_get_ticket_context: { readOnlyHint: true },
+      freescout_search_tickets: { readOnlyHint: true },
+      freescout_get_mailboxes: { readOnlyHint: true },
+      freescout_add_note: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      freescout_update_ticket: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+      freescout_create_draft_reply: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
+    });
+    await handle.close();
+  });
+
   it('preserves the eight tool behaviors and structured content where it is stable', async () => {
     const api = createApi();
     const tools = registeredTools(buildServer({ api: api as never, defaultUserId: 7 }));

@@ -85,6 +85,9 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
     version: options.version ?? packageJson.version,
   });
 
+  // Annotations tell clients which tools only read. Claude groups tools by them,
+  // so read-only tools can be allowed without a prompt while write tools still ask.
+
   // Tool 1: Get Ticket
   server.registerTool(
     'freescout_get_ticket',
@@ -99,6 +102,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
           .default(true)
           .describe('Include all conversation threads'),
       }),
+      annotations: { readOnlyHint: true },
     },
     async ({ ticket, includeThreads }) => {
       const ticketId = api.parseTicketInput(ticket);
@@ -120,6 +124,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
       inputSchema: z.object({
         ticket: z.string().describe('Ticket ID, ticket number, or FreeScout URL'),
       }),
+      annotations: { readOnlyHint: true },
     },
     async ({ ticket }) => {
       const ticketId = api.parseTicketInput(ticket);
@@ -144,6 +149,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
         note: z.string().describe('The note content to add'),
         userId: z.number().optional().describe('User ID for the note (default: from env)'),
       }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     async ({ ticket, note, userId }) => {
       const ticketId = api.parseTicketInput(ticket);
@@ -179,6 +185,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
         assignTo: z.number().optional().describe('User ID to assign the ticket to'),
         userId: z.number().optional().describe('User ID recording this update (default: from env)'),
       }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     },
     async ({ ticket, status, assignTo, userId }) => {
       const ticketId = api.parseTicketInput(ticket);
@@ -238,6 +245,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
             'Optional BCC recipients. Omit to preserve existing recipients; pass [] to clear.'
           ),
       }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     async ({ ticket, replyText, userId, to, cc, bcc }) => {
       const ticketId = api.parseTicketInput(ticket);
@@ -300,6 +308,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
       inputSchema: z.object({
         ticket: z.string().describe('Ticket ID, ticket number, or FreeScout URL'),
       }),
+      annotations: { readOnlyHint: true },
     },
     async ({ ticket }) => {
       const ticketId = api.parseTicketInput(ticket);
@@ -360,6 +369,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
       description:
         'Search for FreeScout tickets with explicit filter parameters. Text search is subject-only (FreeScout has no message-body full-text search): use subject (or its alias textSearch) to match the conversation subject, customerEmail to filter by the customer, and number to look up a single ticket. Use assignee: "unassigned" for unassigned tickets, or assignee: number for a specific user. Supports relative time filters like "7d", "24h". Use includeLastMessage: true to get a preview of the most recent message for each ticket.',
       inputSchema: SearchFiltersSchema,
+      annotations: { readOnlyHint: true },
     },
     async (filters) => {
       const results = await api.searchConversations(filters);
@@ -430,6 +440,7 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
       title: 'Get Mailboxes',
       description: 'Get list of available mailboxes',
       inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
     },
     async () => {
       const mailboxes = await api.getMailboxes();

@@ -20,6 +20,9 @@ npm run format         # Format source files with Prettier
 
 - Target Node.js 24 or newer and strict TypeScript.
 - Register tools with `McpServer.registerTool` and Zod 4 input schemas.
+- Give every tool `annotations`: `readOnlyHint: true` for tools that only read, or
+  `readOnlyHint: false` with `destructiveHint` and `idempotentHint` for tools that
+  write. Clients such as Claude use them to let read-only tools run without a prompt.
 - Keep `buildServer()` side-effect free for tests; the `serveStdio(() => buildServer())`
   entry supports both 2025 legacy and 2026 MCP stdio clients.
 - Do not declare tool output schemas; return `structuredContent` only for stable

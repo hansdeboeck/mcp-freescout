@@ -137,6 +137,42 @@ Or in development mode with auto-reload:
 npm run dev
 ```
 
+## Tool Permissions
+
+Every tool declares MCP [tool annotations](https://modelcontextprotocol.io/specification/2025-11-25/schema#toolannotations), so clients can tell the tools that only read FreeScout data apart from the tools that change it:
+
+| Tool                           | Access | Annotations                                                            |
+| ------------------------------ | ------ | ---------------------------------------------------------------------- |
+| `freescout_get_ticket`         | Read   | `readOnlyHint: true`                                                   |
+| `freescout_analyze_ticket`     | Read   | `readOnlyHint: true`                                                   |
+| `freescout_get_ticket_context` | Read   | `readOnlyHint: true`                                                   |
+| `freescout_search_tickets`     | Read   | `readOnlyHint: true`                                                   |
+| `freescout_get_mailboxes`      | Read   | `readOnlyHint: true`                                                   |
+| `freescout_add_note`           | Write  | `readOnlyHint: false`, `destructiveHint: false`                        |
+| `freescout_create_draft_reply` | Write  | `readOnlyHint: false`, `destructiveHint: false`                        |
+| `freescout_update_ticket`      | Write  | `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: true` |
+
+Annotations are hints: your MCP client decides whether it asks before a tool runs. To let Claude read tickets without asking, while notes, drafts and status changes still need your approval:
+
+- **Claude Desktop and claude.ai**: open the **Connectors** settings, select the FreeScout server and set its read-only tools to **Always allow**. Leave the write tools on **Needs approval**.
+- **Claude Code**: add allow rules for the read tools to `.claude/settings.json` in your project or to `~/.claude/settings.json`. Replace `freescout` with the server name from your MCP configuration:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__freescout__freescout_get_ticket",
+      "mcp__freescout__freescout_analyze_ticket",
+      "mcp__freescout__freescout_get_ticket_context",
+      "mcp__freescout__freescout_search_tickets",
+      "mcp__freescout__freescout_get_mailboxes"
+    ]
+  }
+}
+```
+
+Ticket content is written by your customers, so keep the write tools on approval: that way nothing in a ticket can make Claude change FreeScout without you seeing it first.
+
 ## Available Tools
 
 ### Core Ticket Operations
