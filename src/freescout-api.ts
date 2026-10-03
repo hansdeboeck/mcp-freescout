@@ -320,12 +320,20 @@ export class FreeScoutAPI {
           throw new Error(`FreeScout API error: ${response.status} - ${errorText}`);
         }
 
+        // FreeScout returns 204 No Content for successful update operations.
+        // Do not attempt JSON parsing when the response intentionally has no body.
+        if (response.status === 204) {
+          return undefined as T;
+        }
+
         return response.json() as Promise<T>;
       } catch (error: unknown) {
         clearTimeout(timeoutId);
 
         if (error instanceof Error && error.name === 'AbortError') {
-          throw new Error(`FreeScout API timeout after ${this.retryOptions.timeout}ms`);
+          throw new Error(`FreeScout API timeout after ${this.retryOptions.timeout}ms`, {
+            cause: error,
+          });
         }
 
         throw error;
@@ -402,8 +410,54 @@ export class FreeScoutAPI {
       assignTo?: number;
       byUser?: number;
     }
-  ): Promise<FreeScoutConversation> {
-    return this.request<FreeScoutConversation>(`/conversations/${ticketId}`, 'PUT', updates);
+  ): Promise<void> {
+    await this.request<unknown>(`/conversations/${ticketId}`, 'PUT', updates);
+  }
+
+  /**
+   * Read the current tag names on a conversation via `?embed=tags`.
+   */
+  async getConversationTags(ticketId: string): Promise<string[]> {
+    const conversation = await this.request<{
+      _embedded?: { tags?: Array<{ name?: string }> };
+    }>(`/conversations/${ticketId}?embed=tags`);
+
+    const tags = conversation?._embedded?.tags ?? [];
+    return tags
+      .map((tag) => (typeof tag?.name === 'string' ? tag.name : ''))
+      .filter((name): name is string => name.length > 0);
+  }
+
+  /**
+   * Replace ALL tags on a conversation. FreeScout's tags endpoint has
+   * full-replace semantics: any tag not in this list is removed, and an empty
+   * list clears all tags. Unknown tag names are auto-created. Returns 204.
+   */
+  async replaceConversationTags(ticketId: string, tagNames: string[]): Promise<void> {
+    await this.request<void>(`/conversations/${ticketId}/tags`, 'PUT', { tags: tagNames });
+  }
+
+  /**
+   * Merge new tags into the existing ones without removing any current tags.
+   * Case-insensitive de-dupe (keeping the existing canonical spelling) so we
+   * never create "Bug" vs "bug" duplicates. Returns the resulting tag list.
+   */
+  async addConversationTags(ticketId: string, add: string[]): Promise<string[]> {
+    const current = await this.getConversationTags(ticketId);
+    const merged = new Map<string, string>(); // lowercased -> canonical name to send
+    for (const name of current) {
+      merged.set(name.toLowerCase(), name);
+    }
+    for (const name of add) {
+      const trimmed = name.trim();
+      if (trimmed.length > 0 && !merged.has(trimmed.toLowerCase())) {
+        merged.set(trimmed.toLowerCase(), trimmed);
+      }
+    }
+
+    const result = Array.from(merged.values());
+    await this.replaceConversationTags(ticketId, result);
+    return result;
   }
 
   /**
@@ -414,19 +468,33 @@ export class FreeScoutAPI {
   ): Promise<FreeScoutApiResponse<FreeScoutConversation>> {
     const params = new URLSearchParams();
 
-    // Text search
-    if (filters.textSearch) {
-      params.append('query', filters.textSearch.trim());
+    // Subject search. FreeScout's list API has no body-level full-text search;
+    // the closest supported filter is `subject`. `textSearch` is kept as an
+    // alias, and the previously sent `query` param does not exist in the API
+    // (it was silently ignored), so it is dropped here.
+    const subject = filters.subject ?? filters.textSearch;
+    if (subject) {
+      params.append('subject', subject.trim());
     }
 
-    // Assignee filter
-    if (filters.assignee !== undefined) {
+    // Customer email filter
+    if (filters.customerEmail) {
+      params.append('customerEmail', filters.customerEmail.trim());
+    }
+
+    // Ticket number lookup
+    if (filters.number != null) {
+      params.append('number', filters.number.toString());
+    }
+
+    // Assignee filter. FreeScout's list API uses `assignedTo`, not `assignee`.
+    // Unknown query params are ignored, so the MCP `assignee` name must be mapped.
+    // Empty assignedTo selects unassigned conversations; omit the param for "any".
+    if (filters.assignee !== undefined && filters.assignee !== 'any') {
       if (filters.assignee === 'unassigned') {
-        params.append('assignee', 'null');
-      } else if (filters.assignee === 'any') {
-        // Don't add assignee filter
+        params.append('assignedTo', '');
       } else {
-        params.append('assignee', filters.assignee.toString());
+        params.append('assignedTo', filters.assignee.toString());
       }
     }
 
@@ -469,7 +537,10 @@ export class FreeScoutAPI {
     }
 
     if (filters.pageSize) {
-      params.append('per_page', filters.pageSize.toString());
+      // FreeScout's list API uses `pageSize`, not `per_page`. Unknown query
+      // params are ignored, so `per_page` was a silent no-op and every request
+      // fell back to the server default of 50 results per page.
+      params.append('pageSize', filters.pageSize.toString());
     }
 
     return this.request<FreeScoutApiResponse<FreeScoutConversation>>(
@@ -513,9 +584,9 @@ export class FreeScoutAPI {
     if (state) params.append('state', state);
     if (assignee !== undefined) {
       if (assignee === null) {
-        params.append('assignee', 'null');
+        params.append('assignedTo', '');
       } else {
-        params.append('assignee', assignee);
+        params.append('assignedTo', assignee);
       }
     }
 

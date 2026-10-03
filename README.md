@@ -10,31 +10,21 @@ An MCP (Model Context Protocol) server for FreeScout helpdesk ticket management.
 - 📊 **Advanced Search**: First-class filter parameters with relative time support ("7d", "24h")
 - 🔒 **Type Safety**: Full Zod schema validation with structured outputs
 - 🔁 **Reliability**: Automatic retry logic with exponential backoff for transient failures
-- ⚡ **Modern SDK**: Built on MCP SDK 1.25+ with `McpServer` and `registerTool()` patterns
+- ⚡ **Protocol-ready stdio**: A fresh `buildServer` factory serves both 2025-era and 2026 MCP stdio clients
 
-## What's New in v2.0
+## v3 runtime
 
-**Breaking Changes:**
-
-- Search API redesigned with explicit filter parameters instead of query-string syntax
-- Migrated to modern `McpServer` class with structured outputs
-- Removed Git/GitHub tools (use dedicated Git MCP servers for workflow automation)
-
-**New Features:**
-
-- Explicit search filters: `assignee`, `updatedSince`, `createdSince`, `page`, `pageSize`
-- Relative time support: Use "7d", "24h", "30m" in date filters
-- Exponential backoff retry logic for network errors and rate limits
-- Structured content responses for better type safety
-- Full Zod schema validation throughout
-
-See [CHANGELOG.md](CHANGELOG.md) for migration guide.
+- Requires Node.js 24 or newer.
+- Uses `@modelcontextprotocol/server` 2.x with Zod 4 input schemas.
+- Serves both the 2025 legacy handshake and the 2026 stdio protocol from the same server factory.
+- Delivers `structuredContent` for stable analysis and write-operation results without declaring output schemas.
+- Accepts FreeScout's successful `204 No Content` update responses and records the user ID that initiated a ticket update.
 
 ## Installation
 
 ### Prerequisites
 
-- Node.js 18 or higher
+- Node.js 24 or higher
 - FreeScout instance with API access enabled
 
 ## Quick Start (Recommended)
@@ -91,7 +81,7 @@ Add this to your Cursor settings.json or create `~/.cursor/mcp.json`:
 }
 ```
 
-That's it! The server will automatically use your current workspace directory for Git operations.
+The server communicates only with the FreeScout instance configured in its environment.
 
 ## Manual Installation (Alternative)
 
@@ -146,6 +136,45 @@ Or in development mode with auto-reload:
 ```bash
 npm run dev
 ```
+
+## Tool Permissions
+
+Every tool declares MCP [tool annotations](https://modelcontextprotocol.io/specification/2025-11-25/schema#toolannotations), so clients can tell the tools that only read FreeScout data apart from the tools that change it:
+
+| Tool                           | Access | Annotations                                                            |
+| ------------------------------ | ------ | ---------------------------------------------------------------------- |
+| `freescout_get_ticket`         | Read   | `readOnlyHint: true`                                                   |
+| `freescout_analyze_ticket`     | Read   | `readOnlyHint: true`                                                   |
+| `freescout_get_ticket_context` | Read   | `readOnlyHint: true`                                                   |
+| `freescout_search_tickets`     | Read   | `readOnlyHint: true`                                                   |
+| `freescout_get_mailboxes`      | Read   | `readOnlyHint: true`                                                   |
+| `freescout_get_tags`           | Read   | `readOnlyHint: true`                                                   |
+| `freescout_add_note`           | Write  | `readOnlyHint: false`, `destructiveHint: false`                        |
+| `freescout_create_draft_reply` | Write  | `readOnlyHint: false`, `destructiveHint: false`                        |
+| `freescout_update_ticket`      | Write  | `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: true` |
+| `freescout_set_tags`           | Write  | `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: true` |
+
+Annotations are hints: your MCP client decides whether it asks before a tool runs. To let Claude read tickets without asking, while notes, drafts, tag changes and status changes still need your approval:
+
+- **Claude Desktop and claude.ai**: open the **Connectors** settings, select the FreeScout server and set its read-only tools to **Always allow**. Leave the write tools on **Needs approval**.
+- **Claude Code**: add allow rules for the read tools to `.claude/settings.json` in your project or to `~/.claude/settings.json`. Replace `freescout` with the server name from your MCP configuration:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__freescout__freescout_get_ticket",
+      "mcp__freescout__freescout_analyze_ticket",
+      "mcp__freescout__freescout_get_ticket_context",
+      "mcp__freescout__freescout_search_tickets",
+      "mcp__freescout__freescout_get_mailboxes",
+      "mcp__freescout__freescout_get_tags"
+    ]
+  }
+}
+```
+
+Ticket content is written by your customers, so keep the write tools on approval: that way nothing in a ticket can make Claude change FreeScout without you seeing it first.
 
 ## Available Tools
 
@@ -370,6 +399,38 @@ None
 - "What mailboxes are configured?"
 - "Get mailbox information"
 
+#### `freescout_get_tags`
+
+Get the tag names currently on a ticket. Tags come from FreeScout's Tags module, so both tag tools need it to be installed.
+
+**Parameters:**
+
+- `ticket` (required): Ticket ID, number, or FreeScout URL
+
+**Natural Language Examples:**
+
+- "Which tags does ticket #12345 have?"
+- "Show the tags on this ticket"
+
+#### `freescout_set_tags`
+
+Add tags to a ticket or replace all of its tags.
+
+**Parameters:**
+
+- `ticket` (required): Ticket ID, number, or FreeScout URL
+- `tags` (required): Tag names to apply, e.g. `["bug", "hulp"]`
+- `mode` (optional): `add` (default) merges the tags with the existing ones without removing any; `replace` overwrites all tags with exactly this list, so an empty list clears all tags
+
+When merging, tag names are matched case-insensitively and the existing spelling is kept. Unknown tag names are created automatically.
+
+**Natural Language Examples:**
+
+- "Tag ticket #12345 as bug"
+- "Add the tags 'refund' and 'urgent' to this ticket"
+- "Replace the tags on ticket 34811 with 'resolved'"
+- "Remove all tags from this ticket"
+
 ## Workflow Examples
 
 ### Basic Ticket Analysis
@@ -469,10 +530,9 @@ Jack`,
 
 ```javascript
 // For third-party issues or feature requests
-const reply = await mcp.callTool('freescout_draft_reply', {
+const reply = await mcp.callTool('freescout_create_draft_reply', {
   ticket: '12345',
-  fixDescription: 'This is a limitation of the Elementor plugin that we cannot override.',
-  isExplanatory: true,
+  replyText: 'This is a limitation of the Elementor plugin that we cannot override.',
 });
 ```
 
@@ -493,19 +553,17 @@ const reply = await mcp.callTool('freescout_draft_reply', {
 
 3. **MCP Server** (`index.ts`)
    - Tool registration and request handling
-   - Integration with Git for worktree management
+   - Fresh server factory for each stdio connection
    - Response formatting and error handling
 
 ### Data Flow
 
 ```
-User Request → MCP Server → FreeScout API → Ticket Analyzer
-                    ↓                             ↓
-              Git Operations              Analysis Results
-                    ↓                             ↓
-              Worktree Management         Customer Reply
-                    ↓                             ↓
-                Response → User
+MCP client (2025 or 2026) → stdio entry → buildServer → FreeScout API
+                                                   ↓
+                                            Ticket analysis
+                                                   ↓
+                                            Response to client
 ```
 
 ## Development
@@ -630,7 +688,7 @@ The `freescout_search_tickets` tool has been redesigned with explicit filter par
 
 1. **Relative time filters**: Use `"7d"`, `"24h"`, `"30m"` instead of calculating ISO dates
 2. **Pagination**: Add `page` and `pageSize` parameters for large result sets
-3. **Structured outputs**: All tools now return typed `structuredContent` for better integration
+3. **Structured outputs**: Stable analysis and write results include `structuredContent`; tools do not declare output schemas
 
 ### Automatic Retries
 

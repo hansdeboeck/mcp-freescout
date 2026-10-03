@@ -1,8 +1,9 @@
 import { FreeScoutAPI } from '../freescout-api.js';
 import { ConversationSchema, ThreadSchema, CustomerSchema } from '../types.js';
+import { vi } from 'vitest';
 
 // Mock fetch globally
-const mockFetch = jest.fn();
+const mockFetch = vi.fn();
 const globalWithFetch = globalThis as typeof globalThis & {
   fetch: typeof mockFetch;
 };
@@ -14,7 +15,7 @@ describe('FreeScoutAPI', () => {
   const mockApiKey = 'test-key-123';
 
   beforeEach(() => {
-    jest.spyOn(Math, 'random').mockReturnValue(0);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     api = new FreeScoutAPI(mockBaseUrl, mockApiKey, {
       maxRetries: 2,
       initialDelay: 0,
@@ -24,7 +25,7 @@ describe('FreeScoutAPI', () => {
     mockFetch.mockReset();
   });
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   describe('constructor', () => {
@@ -81,13 +82,11 @@ describe('FreeScoutAPI', () => {
     });
 
     it('should retry on transient failures', async () => {
-      mockFetch
-        .mockRejectedValueOnce(new Error('ECONNRESET'))
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: async () => mockConversationResponse,
-        });
+      mockFetch.mockRejectedValueOnce(new Error('ECONNRESET')).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockConversationResponse,
+      });
 
       const result = await api.getConversation('123');
       expect(mockFetch).toHaveBeenCalledTimes(2);
@@ -160,7 +159,7 @@ describe('FreeScoutAPI', () => {
           },
         ],
       },
-      page: { size: 50, total_elements: 2, total_pages: 1, number: 1 },
+      page: { size: 50, totalElements: 2, totalPages: 1, number: 1 },
     };
 
     it('should search with explicit filters', async () => {
@@ -178,10 +177,110 @@ describe('FreeScoutAPI', () => {
 
       expect(result._embedded?.conversations).toHaveLength(2);
 
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain('query=authentication');
-      expect(url).toContain('status=active');
-      expect(url).toContain('assignee=null');
+      const url = new URL(mockFetch.mock.calls[0][0] as string);
+      // textSearch is an alias for the subject filter; the old `query` param
+      // does not exist in the FreeScout API.
+      expect(url.searchParams.get('subject')).toBe('authentication');
+      expect(url.searchParams.has('query')).toBe(false);
+      expect(url.searchParams.get('status')).toBe('active');
+      // FreeScout documents empty assignedTo as the unassigned filter.
+      expect(url.searchParams.has('assignedTo')).toBe(true);
+      expect(url.searchParams.get('assignedTo')).toBe('');
+      expect(url.searchParams.has('assignee')).toBe(false);
+    });
+
+    it('should map a numeric assignee to assignedTo', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSearchResponse,
+      });
+
+      await api.searchConversations({
+        assignee: 7,
+        mailboxId: 6,
+        status: 'active',
+        page: 1,
+        pageSize: 50,
+      });
+
+      const url = new URL(mockFetch.mock.calls[0][0] as string);
+      expect(url.searchParams.get('assignedTo')).toBe('7');
+      expect(url.searchParams.get('mailboxId')).toBe('6');
+      expect(url.searchParams.get('status')).toBe('active');
+      expect(url.searchParams.get('page')).toBe('1');
+      expect(url.searchParams.get('pageSize')).toBe('50');
+      expect(url.searchParams.has('assignee')).toBe(false);
+    });
+
+    it('should map subject, customerEmail and number to FreeScout filters', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSearchResponse,
+      });
+
+      await api.searchConversations({
+        subject: 'invoice',
+        customerEmail: 'jane@example.com',
+        number: 3704,
+      });
+
+      const url = new URL(mockFetch.mock.calls[0][0] as string);
+      expect(url.searchParams.get('subject')).toBe('invoice');
+      expect(url.searchParams.get('customerEmail')).toBe('jane@example.com');
+      expect(url.searchParams.get('number')).toBe('3704');
+    });
+
+    it('should omit assignment filter when assignee is any', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSearchResponse,
+      });
+
+      await api.searchConversations({
+        assignee: 'any',
+        status: 'active',
+        mailboxId: 6,
+      });
+
+      const url = new URL(mockFetch.mock.calls[0][0] as string);
+      expect(url.searchParams.has('assignedTo')).toBe(false);
+      expect(url.searchParams.has('assignee')).toBe(false);
+      expect(url.searchParams.get('status')).toBe('active');
+      expect(url.searchParams.get('mailboxId')).toBe('6');
+    });
+
+    it('should prefer explicit subject over the textSearch alias', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSearchResponse,
+      });
+
+      await api.searchConversations({ subject: 'billing', textSearch: 'ignored' });
+
+      const url = new URL(mockFetch.mock.calls[0][0] as string);
+      expect(url.searchParams.get('subject')).toBe('billing');
+    });
+
+    it('should omit assignment filter when assignee is not provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSearchResponse,
+      });
+
+      await api.searchConversations({
+        status: 'active',
+        textSearch: 'error',
+      });
+
+      const url = new URL(mockFetch.mock.calls[0][0] as string);
+      expect(url.searchParams.has('assignedTo')).toBe(false);
+      expect(url.searchParams.has('assignee')).toBe(false);
+      expect(url.searchParams.get('subject')).toBe('error');
     });
 
     it('should handle empty search results', async () => {
@@ -190,7 +289,7 @@ describe('FreeScoutAPI', () => {
         status: 200,
         json: async () => ({
           _embedded: { conversations: [] },
-          page: { size: 50, total_elements: 0, total_pages: 0, number: 1 },
+          page: { size: 50, totalElements: 0, totalPages: 0, number: 1 },
         }),
       });
 
@@ -266,6 +365,21 @@ describe('FreeScoutAPI', () => {
       const url = mockFetch.mock.calls[0][0] as string;
       expect(url).toContain('page=2');
     });
+
+    it('should send pageSize using the FreeScout param name', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSearchResponse,
+      });
+
+      await api.searchConversations({ pageSize: 5 });
+
+      const url = new URL(mockFetch.mock.calls[0][0] as string);
+      // FreeScout expects `pageSize`; the previous `per_page` was ignored.
+      expect(url.searchParams.get('pageSize')).toBe('5');
+      expect(url.searchParams.has('per_page')).toBe(false);
+    });
   });
 
   describe('updateConversation', () => {
@@ -287,6 +401,28 @@ describe('FreeScoutAPI', () => {
       );
     });
 
+    it('sends the initiating user ID with ticket updates', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+      });
+
+      await api.updateConversation('123', { assignTo: 22, byUser: 9 });
+
+      const body = JSON.parse((mockFetch.mock.calls[0][1]?.body as string) || '{}');
+      expect(body).toMatchObject({ assignTo: 22, byUser: 9 });
+    });
+
+    it('accepts a successful 204 update without trying to parse a response body', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+      });
+
+      await expect(api.updateConversation('123', { status: 'closed' })).resolves.toBeUndefined();
+    });
+
     it('should handle update failures', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -294,9 +430,63 @@ describe('FreeScoutAPI', () => {
         text: async () => 'Invalid status',
       });
 
-      await expect(
-        api.updateConversation('123', { status: 'closed' })
-      ).rejects.toThrow();
+      await expect(api.updateConversation('123', { status: 'closed' })).rejects.toThrow();
+    });
+  });
+
+  describe('conversation tags', () => {
+    it('reads tag names through the tags embed', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 123,
+          _embedded: { tags: [{ id: 1, name: 'bug' }, { id: 2 }, { id: 3, name: 'hulp' }] },
+        }),
+      });
+
+      await expect(api.getConversationTags('123')).resolves.toEqual(['bug', 'hulp']);
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${mockBaseUrl}/api/conversations/123?embed=tags`,
+        expect.objectContaining({ method: 'GET' })
+      );
+    });
+
+    it('returns no tags when the conversation has none', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 123 }) });
+
+      await expect(api.getConversationTags('123')).resolves.toEqual([]);
+    });
+
+    it('replaces all tags and accepts the 204 response', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+      await expect(api.replaceConversationTags('123', ['bug', 'hulp'])).resolves.toBeUndefined();
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${mockBaseUrl}/api/conversations/123/tags`,
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ tags: ['bug', 'hulp'] }) })
+      );
+    });
+
+    it('merges new tags case-insensitively without dropping existing ones', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ _embedded: { tags: [{ name: 'Bug' }, { name: 'urgent' }] } }),
+        })
+        .mockResolvedValueOnce({ ok: true, status: 204 });
+
+      const result = await api.addConversationTags('123', ['bug', ' hulp ', '', 'URGENT', 'nieuw']);
+
+      expect(result).toEqual(['Bug', 'urgent', 'hulp', 'nieuw']);
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        `${mockBaseUrl}/api/conversations/123/tags`,
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ tags: ['Bug', 'urgent', 'hulp', 'nieuw'] }),
+        })
+      );
     });
   });
 
@@ -458,9 +648,7 @@ describe('FreeScoutAPI', () => {
 
     it('should parse various ticket input formats', () => {
       expect(api.parseTicketInput('123')).toBe('123');
-      expect(api.parseTicketInput('https://test.com/conversation/456')).toBe(
-        '456'
-      );
+      expect(api.parseTicketInput('https://test.com/conversation/456')).toBe('456');
     });
   });
 
@@ -495,9 +683,7 @@ describe('FreeScoutAPI', () => {
         });
       });
 
-      await expect(api.getConversation('123')).rejects.toThrow(
-        /timeout after 10ms/
-      );
+      await expect(api.getConversation('123')).rejects.toThrow(/timeout after 10ms/);
     });
   });
 

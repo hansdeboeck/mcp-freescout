@@ -3,7 +3,7 @@
   "name": "io.github.verygoodplugins/mcp-freescout",
   "title": "MCP FreeScout",
   "description": "FreeScout ticket management with AI-powered analysis, search filters, and structured outputs.",
-  "version": "2.0.1",
+  "version": "3.1.0",
   "websiteUrl": "https://verygoodplugins.com/?utm_source=mcp-registry",
   "repository": {
     "url": "https://github.com/verygoodplugins/mcp-freescout",
@@ -20,7 +20,7 @@
     {
       "registryType": "npm",
       "identifier": "@verygoodplugins/mcp-freescout",
-      "version": "2.0.1",
+      "version": "3.1.0",
       "transport": {
         "type": "stdio"
       },
@@ -81,7 +81,21 @@
     {
       "name": "freescout_get_mailboxes",
       "description": "List available FreeScout mailboxes"
+    },
+    {
+      "name": "freescout_get_tags",
+      "description": "Get the tag names on a ticket"
+    },
+    {
+      "name": "freescout_set_tags",
+      "description": "Add tags to a ticket or replace all of its tags"
     }
   ],
-  "keywords": ["freescout", "helpdesk", "ticket-management", "customer-support", "automation"]
+  "keywords": [
+    "freescout",
+    "helpdesk",
+    "ticket-management",
+    "customer-support",
+    "automation"
+  ]
 }
