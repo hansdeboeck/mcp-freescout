@@ -18,11 +18,14 @@ const packageJson = require('../package.json') as PackageJson;
 
 type FreeScoutApiPort = Pick<
   FreeScoutAPI,
+  | 'addConversationTags'
   | 'addThread'
   | 'createDraftReply'
   | 'getConversation'
+  | 'getConversationTags'
   | 'getMailboxes'
   | 'parseTicketInput'
+  | 'replaceConversationTags'
   | 'searchConversations'
   | 'updateConversation'
 >;
@@ -447,6 +450,74 @@ export function buildServer(options: BuildServerOptions = {}): McpServer {
 
       return {
         content: [{ type: 'text', text: JSON.stringify(mailboxes, null, 2) }],
+      };
+    }
+  );
+
+  // Tool 9: Get Ticket Tags
+  server.registerTool(
+    'freescout_get_tags',
+    {
+      title: 'Get Ticket Tags',
+      description: 'Get the current tag names on a FreeScout ticket.',
+      inputSchema: z.object({
+        ticket: z.string().describe('Ticket ID, ticket number, or FreeScout URL'),
+      }),
+      annotations: { readOnlyHint: true },
+    },
+    async ({ ticket }) => {
+      const ticketId = api.parseTicketInput(ticket);
+      const tags = await api.getConversationTags(ticketId);
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ ticketId, tags }, null, 2) }],
+      };
+    }
+  );
+
+  // Tool 10: Set Ticket Tags
+  server.registerTool(
+    'freescout_set_tags',
+    {
+      title: 'Set Ticket Tags',
+      description:
+        'Apply tags to a FreeScout ticket. mode "add" (default) merges the given tags ' +
+        'with the ticket\'s existing tags without removing any; mode "replace" overwrites ' +
+        'all tags with exactly the given list (an empty list clears all tags). Tag names ' +
+        'are matched case-insensitively and unknown names are created automatically.',
+      inputSchema: z.object({
+        ticket: z.string().describe('Ticket ID, ticket number, or FreeScout URL'),
+        tags: z.array(z.string()).describe('Tag names to apply, e.g. ["bug","hulp"]'),
+        mode: z
+          .enum(['add', 'replace'])
+          .optional()
+          .default('add')
+          .describe('"add" merges with existing tags (default); "replace" overwrites all tags'),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+    },
+    async ({ ticket, tags, mode }) => {
+      const ticketId = api.parseTicketInput(ticket);
+      const resolvedMode = mode ?? 'add';
+
+      let resultTags: string[];
+      if (resolvedMode === 'replace') {
+        await api.replaceConversationTags(ticketId, tags);
+        resultTags = tags;
+      } else {
+        resultTags = await api.addConversationTags(ticketId, tags);
+      }
+
+      const output = {
+        success: true,
+        ticketId,
+        mode: resolvedMode,
+        tags: resultTags,
+      };
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
+        structuredContent: output,
       };
     }
   );

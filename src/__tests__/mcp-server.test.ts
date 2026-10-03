@@ -75,11 +75,11 @@ describe('buildServer', () => {
     vi.unstubAllEnvs();
   });
 
-  it('registers the eight tools without declared output schemas', () => {
+  it('registers the ten tools without declared output schemas', () => {
     const server = buildServer({ api: createApi() as never });
     const tools = registeredTools(server);
 
-    expect(Object.keys(tools)).toHaveLength(8);
+    expect(Object.keys(tools)).toHaveLength(10);
     expect(Object.values(tools).every((tool) => tool.outputSchema === undefined)).toBe(true);
   });
 
@@ -116,6 +116,7 @@ describe('buildServer', () => {
       freescout_get_ticket_context: { readOnlyHint: true },
       freescout_search_tickets: { readOnlyHint: true },
       freescout_get_mailboxes: { readOnlyHint: true },
+      freescout_get_tags: { readOnlyHint: true },
       freescout_add_note: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
       freescout_update_ticket: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
       freescout_create_draft_reply: {
@@ -123,6 +124,7 @@ describe('buildServer', () => {
         destructiveHint: false,
         idempotentHint: false,
       },
+      freescout_set_tags: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     });
     await handle.close();
   });

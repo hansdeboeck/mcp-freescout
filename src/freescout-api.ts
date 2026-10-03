@@ -415,6 +415,52 @@ export class FreeScoutAPI {
   }
 
   /**
+   * Read the current tag names on a conversation via `?embed=tags`.
+   */
+  async getConversationTags(ticketId: string): Promise<string[]> {
+    const conversation = await this.request<{
+      _embedded?: { tags?: Array<{ name?: string }> };
+    }>(`/conversations/${ticketId}?embed=tags`);
+
+    const tags = conversation?._embedded?.tags ?? [];
+    return tags
+      .map((tag) => (typeof tag?.name === 'string' ? tag.name : ''))
+      .filter((name): name is string => name.length > 0);
+  }
+
+  /**
+   * Replace ALL tags on a conversation. FreeScout's tags endpoint has
+   * full-replace semantics: any tag not in this list is removed, and an empty
+   * list clears all tags. Unknown tag names are auto-created. Returns 204.
+   */
+  async replaceConversationTags(ticketId: string, tagNames: string[]): Promise<void> {
+    await this.request<void>(`/conversations/${ticketId}/tags`, 'PUT', { tags: tagNames });
+  }
+
+  /**
+   * Merge new tags into the existing ones without removing any current tags.
+   * Case-insensitive de-dupe (keeping the existing canonical spelling) so we
+   * never create "Bug" vs "bug" duplicates. Returns the resulting tag list.
+   */
+  async addConversationTags(ticketId: string, add: string[]): Promise<string[]> {
+    const current = await this.getConversationTags(ticketId);
+    const merged = new Map<string, string>(); // lowercased -> canonical name to send
+    for (const name of current) {
+      merged.set(name.toLowerCase(), name);
+    }
+    for (const name of add) {
+      const trimmed = name.trim();
+      if (trimmed.length > 0 && !merged.has(trimmed.toLowerCase())) {
+        merged.set(trimmed.toLowerCase(), trimmed);
+      }
+    }
+
+    const result = Array.from(merged.values());
+    await this.replaceConversationTags(ticketId, result);
+    return result;
+  }
+
+  /**
    * Search conversations with explicit filter parameters
    */
   async searchConversations(
