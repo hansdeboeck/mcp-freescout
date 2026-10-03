@@ -148,11 +148,13 @@ Every tool declares MCP [tool annotations](https://modelcontextprotocol.io/speci
 | `freescout_get_ticket_context` | Read   | `readOnlyHint: true`                                                   |
 | `freescout_search_tickets`     | Read   | `readOnlyHint: true`                                                   |
 | `freescout_get_mailboxes`      | Read   | `readOnlyHint: true`                                                   |
+| `freescout_get_tags`           | Read   | `readOnlyHint: true`                                                   |
 | `freescout_add_note`           | Write  | `readOnlyHint: false`, `destructiveHint: false`                        |
 | `freescout_create_draft_reply` | Write  | `readOnlyHint: false`, `destructiveHint: false`                        |
 | `freescout_update_ticket`      | Write  | `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: true` |
+| `freescout_set_tags`           | Write  | `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: true` |
 
-Annotations are hints: your MCP client decides whether it asks before a tool runs. To let Claude read tickets without asking, while notes, drafts and status changes still need your approval:
+Annotations are hints: your MCP client decides whether it asks before a tool runs. To let Claude read tickets without asking, while notes, drafts, tag changes and status changes still need your approval:
 
 - **Claude Desktop and claude.ai**: open the **Connectors** settings, select the FreeScout server and set its read-only tools to **Always allow**. Leave the write tools on **Needs approval**.
 - **Claude Code**: add allow rules for the read tools to `.claude/settings.json` in your project or to `~/.claude/settings.json`. Replace `freescout` with the server name from your MCP configuration:
@@ -165,7 +167,8 @@ Annotations are hints: your MCP client decides whether it asks before a tool run
       "mcp__freescout__freescout_analyze_ticket",
       "mcp__freescout__freescout_get_ticket_context",
       "mcp__freescout__freescout_search_tickets",
-      "mcp__freescout__freescout_get_mailboxes"
+      "mcp__freescout__freescout_get_mailboxes",
+      "mcp__freescout__freescout_get_tags"
     ]
   }
 }
@@ -395,6 +398,38 @@ None
 - "List the mailboxes in FreeScout"
 - "What mailboxes are configured?"
 - "Get mailbox information"
+
+#### `freescout_get_tags`
+
+Get the tag names currently on a ticket. Tags come from FreeScout's Tags module, so both tag tools need it to be installed.
+
+**Parameters:**
+
+- `ticket` (required): Ticket ID, number, or FreeScout URL
+
+**Natural Language Examples:**
+
+- "Which tags does ticket #12345 have?"
+- "Show the tags on this ticket"
+
+#### `freescout_set_tags`
+
+Add tags to a ticket or replace all of its tags.
+
+**Parameters:**
+
+- `ticket` (required): Ticket ID, number, or FreeScout URL
+- `tags` (required): Tag names to apply, e.g. `["bug", "hulp"]`
+- `mode` (optional): `add` (default) merges the tags with the existing ones without removing any; `replace` overwrites all tags with exactly this list, so an empty list clears all tags
+
+When merging, tag names are matched case-insensitively and the existing spelling is kept. Unknown tag names are created automatically.
+
+**Natural Language Examples:**
+
+- "Tag ticket #12345 as bug"
+- "Add the tags 'refund' and 'urgent' to this ticket"
+- "Replace the tags on ticket 34811 with 'resolved'"
+- "Remove all tags from this ticket"
 
 ## Workflow Examples
 

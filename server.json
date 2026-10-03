@@ -81,6 +81,14 @@
     {
       "name": "freescout_get_mailboxes",
       "description": "List available FreeScout mailboxes"
+    },
+    {
+      "name": "freescout_get_tags",
+      "description": "Get the tag names on a ticket"
+    },
+    {
+      "name": "freescout_set_tags",
+      "description": "Add tags to a ticket or replace all of its tags"
     }
   ],
   "keywords": [
