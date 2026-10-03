@@ -41,6 +41,9 @@ function createApi() {
       page: { size: 50, totalElements: 1, number: 1, totalPages: 1 },
     }),
     getMailboxes: vi.fn().mockResolvedValue([{ id: 4, name: 'Support' }]),
+    getConversationTags: vi.fn().mockResolvedValue(['bug']),
+    addConversationTags: vi.fn().mockResolvedValue(['bug', 'hulp']),
+    replaceConversationTags: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -177,6 +180,37 @@ describe('buildServer', () => {
       7,
       conversation.to ? { to: conversation.to, cc: conversation.cc, bcc: conversation.bcc } : {}
     );
+  });
+
+  it('reads, merges and replaces ticket tags', async () => {
+    const api = createApi();
+    const tools = registeredTools(buildServer({ api: api as never }));
+
+    const read = await execute(tools, 'freescout_get_tags', { ticket: '#123' });
+    const added = await execute(tools, 'freescout_set_tags', { ticket: '123', tags: ['hulp'] });
+    const replaced = await execute(tools, 'freescout_set_tags', {
+      ticket: '123',
+      tags: [],
+      mode: 'replace',
+    });
+
+    const readText = (read.content as Array<{ type: string; text: string }>)[0].text;
+    expect(JSON.parse(readText)).toEqual({ ticketId: '123', tags: ['bug'] });
+    expect(read.structuredContent).toBeUndefined();
+    expect(api.addConversationTags).toHaveBeenCalledWith('123', ['hulp']);
+    expect(added.structuredContent).toEqual({
+      success: true,
+      ticketId: '123',
+      mode: 'add',
+      tags: ['bug', 'hulp'],
+    });
+    expect(api.replaceConversationTags).toHaveBeenCalledWith('123', []);
+    expect(replaced.structuredContent).toEqual({
+      success: true,
+      ticketId: '123',
+      mode: 'replace',
+      tags: [],
+    });
   });
 });
 

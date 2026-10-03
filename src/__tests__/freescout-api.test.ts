@@ -434,6 +434,62 @@ describe('FreeScoutAPI', () => {
     });
   });
 
+  describe('conversation tags', () => {
+    it('reads tag names through the tags embed', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 123,
+          _embedded: { tags: [{ id: 1, name: 'bug' }, { id: 2 }, { id: 3, name: 'hulp' }] },
+        }),
+      });
+
+      await expect(api.getConversationTags('123')).resolves.toEqual(['bug', 'hulp']);
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${mockBaseUrl}/api/conversations/123?embed=tags`,
+        expect.objectContaining({ method: 'GET' })
+      );
+    });
+
+    it('returns no tags when the conversation has none', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 123 }) });
+
+      await expect(api.getConversationTags('123')).resolves.toEqual([]);
+    });
+
+    it('replaces all tags and accepts the 204 response', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 204 });
+
+      await expect(api.replaceConversationTags('123', ['bug', 'hulp'])).resolves.toBeUndefined();
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${mockBaseUrl}/api/conversations/123/tags`,
+        expect.objectContaining({ method: 'PUT', body: JSON.stringify({ tags: ['bug', 'hulp'] }) })
+      );
+    });
+
+    it('merges new tags case-insensitively without dropping existing ones', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ _embedded: { tags: [{ name: 'Bug' }, { name: 'urgent' }] } }),
+        })
+        .mockResolvedValueOnce({ ok: true, status: 204 });
+
+      const result = await api.addConversationTags('123', ['bug', ' hulp ', '', 'URGENT', 'nieuw']);
+
+      expect(result).toEqual(['Bug', 'urgent', 'hulp', 'nieuw']);
+      expect(mockFetch).toHaveBeenLastCalledWith(
+        `${mockBaseUrl}/api/conversations/123/tags`,
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ tags: ['Bug', 'urgent', 'hulp', 'nieuw'] }),
+        })
+      );
+    });
+  });
+
   describe('addThread', () => {
     it('should add a thread to a conversation', async () => {
       mockFetch.mockResolvedValueOnce({
